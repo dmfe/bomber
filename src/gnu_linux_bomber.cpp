@@ -2,7 +2,7 @@
 * File Name: gnu_linux_bomber.cpp
 * Purpose:
 * Creation Date: 12-01-2020
-* Last Modified: Mon 13 Jan 2020 01:27:05 AM MSK
+* Last Modified: Tue 14 Jan 2020 01:26:06 AM MSK
 * Created by: dima
 -----------------------------------------------------------------------------*/
 #include <X11/Xlib.h>
@@ -10,59 +10,58 @@
 #include <stdlib.h>
 
 int main(void) {
-    Display *d;
-    int s;
-    Window w;
-    XEvent e;
-
-    /* Open connection with the server*/
-    d = XOpenDisplay(NULL);
-    if (d == NULL) {
-        printf("Cannot open display\n");
+    Display *display = XOpenDisplay(NULL);
+    if (display == NULL) {
+        fprintf(stderr, "Cannot open display\n");
         exit(1);
     }
-    s = DefaultScreen(d);
 
-    /* Create Window*/
-    w = XCreateSimpleWindow(d, RootWindow(d, s), 10, 10, 500, 500, 1,
-                            BlackPixel(d, s), WhitePixel(d, s));
+    int screenNumber = DefaultScreen(display);
+    int blackColor = BlackPixel(display, screenNumber);
+    int whiteColor = WhitePixel(display, screenNumber);
+
+    Window window = XCreateSimpleWindow(display,
+                                        RootWindow(display, screenNumber),
+                                        10, 10, 500, 500, 1,
+                                        blackColor, whiteColor);
 
     /* Process Window Close Event through event handler
        so XNextEvent doesn't fail*/
-    Atom delWindow = XInternAtom(d, "WM_DELETE_WINDOW", 0);
-    XSetWMProtocols(d, w, &delWindow, 1);
+    Atom delWindow = XInternAtom(display, "WM_DELETE_WINDOW", 0);
+    XSetWMProtocols(display, window, &delWindow, 1);
 
     /* Select kind of events we are interested in*/
-    XSelectInput(d, w, ExposureMask|KeyPressMask);
+    XSelectInput(display, window, ExposureMask|KeyPressMask);
 
     /* Map (show) the window*/
-    XMapWindow(d, w);
+    XMapWindow(display, window);
 
-    /* Event loop*/
+    XEvent event;
     while(1) {
-        XNextEvent(d, &e);
+        XNextEvent(display, &event);
 
         /* Draw or redraw the window*/
-        if (e.type == Expose) {
-            XFillRectangle(d, w, DefaultGC(d, s), 20, 20, 10, 10);
+        if (event.type == Expose) {
+            XFillRectangle(display, window, DefaultGC(display, screenNumber),
+                           20, 20, 10, 10);
         }
 
-        if (e.type == KeyPress) {
+        if (event.type == KeyPress) {
             /* Exit on ESC*/
-            if (e.xkey.keycode == 0x09) {
+            if (event.xkey.keycode == 0x09) {
                 break;
             }
         }
 
         /* Handle Windows Close Event*/
-        if (e.type == ClientMessage) {
+        if (event.type == ClientMessage) {
             break;
         }
     }
 
-    XDestroyWindow(d, w);
+    XDestroyWindow(display, window);
 
-    XCloseDisplay(d);
+    XCloseDisplay(display);
 
     return(0);
 }
