@@ -2,7 +2,7 @@
 * File Name: gnu_linux_bomber.cpp
 * Purpose:
 * Creation Date: 12-01-2020
-* Last Modified: Thu 16 Jan 2020 02:55:57 AM MSK
+* Last Modified: Fri 17 Jan 2020 04:48:49 AM MSK
 * Created by: dima
 -----------------------------------------------------------------------------*/
 #include <X11/Xlib.h>
@@ -23,139 +23,162 @@
 #define ICON_TITLE "Bomber"
 #define PRG_CLASS "Bomber"
 
-void SetWindowManagerHints(Display *display,
-                                  char *PClass,
-                                  char *argv[],
-                                  int argc,
-                                  Window window,
-                                  int x,
-                                  int y,
-                                  int width,
-                                  int height,
-                                  int minWidth,
-                                  int minHeight,
-                                  char *title,
-                                  char *iconTitle,
-                                  Pixmap pixmap) {
+#define internal static
+#define local_persist static
+#define global_variable static
 
-    XTextProperty windowName;
-    XTextProperty iconName;
-    if (!XStringListToTextProperty(&title, 1, &windowName) ||
-        !XStringListToTextProperty(&iconTitle, 1, &iconName)) {
+//TODO: This is a global for now.
+global_variable bool Running;
+
+struct {
+    int width;
+    int height;
+    char *title;
+    char *icon_title;
+
+    Display *display;
+    int screen;
+    Window root;
+    Window window;
+    XEvent *event;
+    GC gc;
+    unsigned long black_pixel;
+    unsigned long white_pixel;
+} app_win;
+
+internal void
+x_connect() {
+    app_win.display = XOpenDisplay(NULL);
+    if (!app_win.display) {
+        fprintf(stderr, "Could not opent the display.\n");
+        exit(1);
+    }
+    app_win.screen = DefaultScreen(app_win.display);
+    app_win.root = RootWindow(app_win.display, app_win.screen);
+    app_win.black_pixel = BlackPixel(app_win.display, app_win.screen);
+    app_win.white_pixel = WhitePixel(app_win.display, app_win.screen);
+}
+
+internal void
+create_window() {
+    app_win.width = WIDTH;
+    app_win.height = HEIGHT;
+    app_win.window = XCreateSimpleWindow(app_win.display,
+                                         app_win.root,
+                                         X, Y,
+                                         app_win.width,
+                                         app_win.height,
+                                         BORDER_WIDTH,
+                                         app_win.black_pixel,
+                                         app_win.white_pixel);
+
+    app_win.title = TITLE;
+    app_win.icon_title = ICON_TITLE;
+    XTextProperty window_name;
+    XTextProperty icon_name;
+    if (!XStringListToTextProperty(&app_win.title, 1, &window_name) ||
+        !XStringListToTextProperty(&app_win.icon_title, 1, &icon_name)) {
 
         fprintf(stderr, "Error during creating text properties.\n");
         exit(1);
     }
 
-    XSizeHints sizeHints = {};
-    sizeHints.flags = PPosition|PSize|PMinSize;
-    sizeHints.x = x;
-    sizeHints.y = y;
-    sizeHints.width = width;
-    sizeHints.height = height;
-    sizeHints.min_width = minWidth;
-    sizeHints.min_height = minHeight;
+    XSetWMName(app_win.display, app_win.window, &window_name);
+    XSetWMIconName(app_win.display, app_win.window, &icon_name);
 
-    XWMHints wmHints = {};
-    wmHints.flags = StateHint|IconPixmapHint|InputHint;
-    wmHints.initial_state = NormalState;
-    wmHints.input = True;
-    wmHints.icon_pixmap = pixmap;
+    Atom del_window = XInternAtom(app_win.display, "WM_DELETE_WINDOW", 0);
+    XSetWMProtocols(app_win.display, app_win.window, &del_window, 1);
 
-    XClassHint classHints = {};
-    classHints.res_name = argv[0];
-    classHints.res_class = PClass;
+    XSelectInput(app_win.display, app_win.window,
+                 ExposureMask|
+                 KeyPressMask|
+                 StructureNotifyMask);
 
-    XSetWMProperties(display, window, &windowName, &iconName, argv, argc,
-                     &sizeHints, &wmHints, &classHints);
+    XMapWindow(app_win.display, app_win.window);
 }
 
-void handleExposeEvent(Display *display,
-                       Window window,
-                       XEvent *event,
-                       int black,
-                       int white,
-                       GC gc) {
+internal void
+set_up_gc() {
+    app_win.screen = DefaultScreen(app_win.display);
+    app_win.gc = XCreateGC(app_win.display, app_win.window, 0, 0);
+    XSetBackground(app_win.display, app_win.gc, app_win.white_pixel);
+    XSetForeground(app_win.display, app_win.gc, app_win.black_pixel);
+}
 
-    if (!event->xexpose.count) {
-        fprintf(stdout, "Window redraw\n");
-
-        static int color = black;
-        if (color == black) {
-           color = white;
+internal void
+draw_screen() {
+    if (!app_win.event->xexpose.count) {
+        fprintf(stdout, "Redraw handling.\n");
+        local_persist int color = app_win.black_pixel;
+        if (color == app_win.black_pixel) {
+           color = app_win.white_pixel;
         } else {
-            color = black;
+            color = app_win.black_pixel;
         }
 
-        XWindowAttributes winAttrs;
-        XGetWindowAttributes(display, window, &winAttrs);
-
-        XSetForeground(display, gc, color);
-        XFillRectangle(display, window, gc, 0, 0,
-                       winAttrs.width, winAttrs.height);
-        XFlush(display);
+        XSetForeground(app_win.display, app_win.gc, color);
+        XFillRectangle(app_win.display, app_win.window, app_win.gc, 0, 0,
+                       app_win.width, app_win.height);
+        XFlush(app_win.display);
     }
 }
 
-int main(int argc, char *argv[]) {
-    Display *display = XOpenDisplay(NULL);
-    if (display == NULL) {
-        fprintf(stderr, "Cannot open display\n");
-        exit(1);
-    }
+internal void resizeDIBSection(int width, int height);
 
-    int screenNumber = DefaultScreen(display);
-    int blackColor = BlackPixel(display, screenNumber);
-    int whiteColor = WhitePixel(display, screenNumber);
-
-    Window window = XCreateSimpleWindow(display,
-                                        RootWindow(display, screenNumber),
-                                        X, Y, WIDTH, HEIGHT, BORDER_WIDTH,
-                                        blackColor, whiteColor);
-
-    SetWindowManagerHints(display, PRG_CLASS, argv, argc, window,
-                          X, Y, WIDTH, HEIGHT, WIDTH_MIN, HEIGHT_MIN,
-                          TITLE, ICON_TITLE, 0);
-
-    /* Process Window Close Event through event handler
-       so XNextEvent doesn't fail*/
-    Atom delWindow = XInternAtom(display, "WM_DELETE_WINDOW", 0);
-    XSetWMProtocols(display, window, &delWindow, 1);
-
-    /* Select kind of events we are interested in*/
-    XSelectInput(display, window, ExposureMask|KeyPressMask);
-
-    /* Map (show) the window*/
-    XMapWindow(display, window);
-
-    XEvent event;
-    GC gc = XCreateGC(display, window, 0, NULL);
-    while(1) {
-        XNextEvent(display, &event);
+internal void
+event_loop() {
+    Running = true;
+    while(Running) {
+        XEvent event;
+        XNextEvent(app_win.display, &event);
+        app_win.event = &event;
 
         if (event.type == Expose) {
-            fprintf(stdout, "Window exposed\n");
-            handleExposeEvent(display, window, &event,
-                              blackColor, whiteColor, gc);
+            draw_screen();
         }
 
-        if (event.type == KeyPress) {
-            fprintf(stdout, "Key pressed\n");
-            if (event.xkey.keycode == 0x09) {
-                break;
+        if (event.type == ConfigureNotify) {
+            XConfigureEvent config_event = event.xconfigure;
+
+            if (config_event.width != app_win.width ||
+                config_event.height != app_win.height) {
+
+                app_win.width = config_event.width;
+                app_win.height = config_event.height;
+
+                resizeDIBSection(app_win.width, app_win.height);
             }
         }
 
-        /* Handle Windows Close Event*/
+        if (event.type == KeyPress) {
+            fprintf(stdout, "Key pressed.\n");
+        }
+
         if (event.type == ClientMessage) {
-            fprintf(stdout, "window cloase event\n");
-            break;
+            //TODO: Handle this with a message to the user.
+            Running = false;
         }
     }
+}
 
-    XFreeGC(display, gc);
-    XDestroyWindow(display, window);
-    XCloseDisplay(display);
+internal void
+release() {
+    XFreeGC(app_win.display, app_win.gc);
+    XDestroyWindow(app_win.display, app_win.window);
+    XCloseDisplay(app_win.display);
+}
+
+internal void
+resizeDIBSection(int width, int height) {
+    fprintf(stdout, "Resize handling.\n");
+}
+
+int main(int argc, char *argv[]) {
+    x_connect();
+    create_window();
+    set_up_gc();
+    event_loop();
+    release();
 
     return(0);
 }
